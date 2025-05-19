@@ -11,46 +11,67 @@ class WebSocketService {
     }
 
     connect() {
-        this.client = new Client({
-            webSocketFactory: () => new SockJS(this.url),
-            debug: (str) => {
-                console.log(str);
-            },
-            reconnectDelay: 5000,
-            heartbeatIncoming: 4000,
-            heartbeatOutgoing: 4000,
-        });
+        try {
+            this.client = new Client({
+                webSocketFactory: () => new SockJS(this.url),
+                debug: (str) => {
+                    console.log(str);
+                },
+                reconnectDelay: 5000,
+                heartbeatIncoming: 4000,
+                heartbeatOutgoing: 4000,
+                onStompError: (frame) => {
+                    console.error('STOMP error:', frame);
+                    if (this.onErrorCallback) {
+                        this.onErrorCallback(frame);
+                    }
+                }
+            });
 
-        this.client.onConnect = () => {
-            console.log('Connected to WebSocket');
-            this.subscribeToTopics();
-        };
+            this.client.onConnect = () => {
+                console.log('Connected to WebSocket');
+                this.subscribeToTopics();
+            };
 
-        this.client.onStompError = (frame) => {
-            console.error('WebSocket error: ', frame);
+            this.client.activate();
+        } catch (error) {
+            console.error('WebSocket connection error:', error);
             if (this.onErrorCallback) {
-                this.onErrorCallback(frame);
+                this.onErrorCallback(error);
             }
-        };
-
-        this.client.activate();
+        }
     }
 
     subscribeToTopics() {
-        // Subscribe to logs
-        this.subscriptions['logs'] = this.client.subscribe('/topic/logs', (message) => {
-            this.onMessageCallback('logs', JSON.parse(message.body));
-        });
+        try {
+            // Subscribe to logs
+            this.subscriptions['logs'] = this.client.subscribe('/topic/logs', (message) => {
+                const data = message.body ? JSON.parse(message.body) : null;
+                this.onMessageCallback('logs', data);
+            });
 
-        // Subscribe to ticket availability
-        this.subscriptions['ticket-availability'] = this.client.subscribe('/topic/ticket-availability', (message) => {
-            this.onMessageCallback('ticket-availability', JSON.parse(message.body));
-        });
+            // Subscribe to ticket availability
+            this.subscriptions['ticket-availability'] = this.client.subscribe('/topic/ticket-availability', (message) => {
+                const data = message.body ? JSON.parse(message.body) : null;
+                this.onMessageCallback('ticket-availability', data);
+            });
+        } catch (error) {
+            console.error('Error subscribing to topics:', error);
+            if (this.onErrorCallback) {
+                this.onErrorCallback(error);
+            }
+        }
     }
 
     disconnect() {
         if (this.client) {
-            Object.values(this.subscriptions).forEach(sub => sub.unsubscribe());
+            Object.values(this.subscriptions).forEach(sub => {
+                try {
+                    sub.unsubscribe();
+                } catch (error) {
+                    console.error('Error unsubscribing:', error);
+                }
+            });
             this.client.deactivate();
             console.log('WebSocket disconnected');
         }
