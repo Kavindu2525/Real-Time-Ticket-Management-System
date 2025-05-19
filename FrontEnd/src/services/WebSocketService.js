@@ -1,4 +1,4 @@
-import { Stomp } from '@stomp/stompjs';
+import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 
 class WebSocketService {
@@ -6,42 +6,52 @@ class WebSocketService {
         this.url = url;
         this.onMessageCallback = onMessageCallback;
         this.onErrorCallback = onErrorCallback;
-        this.stompClient = null;
+        this.client = null;
         this.subscriptions = {};
     }
 
     connect() {
-        const socket = new SockJS(this.url);
-        this.stompClient = Stomp.over(socket);
-        this.stompClient.debug = null; // Disable debug logs
-
-        this.stompClient.connect({}, (frame) => {
-            console.log('WebSocket connected: ', frame);
-            this.subscribeToTopics();
-        }, (error) => {
-            console.error('WebSocket error: ', error);
-            if (this.onErrorCallback) {
-                this.onErrorCallback(error);
-            }
+        this.client = new Client({
+            webSocketFactory: () => new SockJS(this.url),
+            debug: (str) => {
+                console.log(str);
+            },
+            reconnectDelay: 5000,
+            heartbeatIncoming: 4000,
+            heartbeatOutgoing: 4000,
         });
+
+        this.client.onConnect = () => {
+            console.log('Connected to WebSocket');
+            this.subscribeToTopics();
+        };
+
+        this.client.onStompError = (frame) => {
+            console.error('WebSocket error: ', frame);
+            if (this.onErrorCallback) {
+                this.onErrorCallback(frame);
+            }
+        };
+
+        this.client.activate();
     }
 
     subscribeToTopics() {
         // Subscribe to logs
-        this.subscriptions['logs'] = this.stompClient.subscribe('/topic/logs', (message) => {
+        this.subscriptions['logs'] = this.client.subscribe('/topic/logs', (message) => {
             this.onMessageCallback('logs', JSON.parse(message.body));
         });
 
         // Subscribe to ticket availability
-        this.subscriptions['ticket-availability'] = this.stompClient.subscribe('/topic/ticket-availability', (message) => {
+        this.subscriptions['ticket-availability'] = this.client.subscribe('/topic/ticket-availability', (message) => {
             this.onMessageCallback('ticket-availability', JSON.parse(message.body));
         });
     }
 
     disconnect() {
-        if (this.stompClient) {
+        if (this.client) {
             Object.values(this.subscriptions).forEach(sub => sub.unsubscribe());
-            this.stompClient.disconnect();
+            this.client.deactivate();
             console.log('WebSocket disconnected');
         }
     }
